@@ -30,17 +30,18 @@ class Test_Resources_Plugin {
             return;
         }
 
-        $post_id = wp_insert_post(array(
-            'post_title'   => 'Sample Resource',
-            'post_status'  => 'publish',
-            'post_type'    => 'resource',
-            'post_content' => '',
-        ));
+        //Commented for now  
+        // $post_id = wp_insert_post(array(
+        //     'post_title'   => 'Sample Resource',
+        //     'post_status'  => 'publish',
+        //     'post_type'    => 'resource',
+        //     'post_content' => '',
+        // ));
 
-        if (! is_wp_error($post_id)) {
-            update_post_meta($post_id, self::META_KEY_SUMMARY, 'This is a sample summary for the resource. It demonstrates how summaries are stored and used to compute reading estimates.');
-            update_post_meta($post_id, self::META_KEY_LEVEL, 'beginner');
-        }
+        // if (! is_wp_error($post_id) && $post_id) {
+        //     update_post_meta($post_id, self::META_KEY_SUMMARY, 'This is a sample summary for the resource. It demonstrates how summaries are stored and used to compute reading estimates.');
+        //     update_post_meta($post_id, self::META_KEY_LEVEL, 'beginner');
+        // }
     }
 
     public function register_post_type_and_meta() {
@@ -79,6 +80,15 @@ class Test_Resources_Plugin {
             'auth_callback' => function() { return current_user_can('edit_posts'); },
         ));
     }
+    public function register_routes() {
+        register_rest_route('test/v1', '/resources', array(
+            'methods' => 'GET',
+            'callback' => array($this, 'handle_get_resources'),
+            // permission callback not used; public endpoint
+            'permission_callback' => '__return_true',
+        ));
+    }
+
 
 }
 
