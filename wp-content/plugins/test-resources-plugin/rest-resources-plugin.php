@@ -19,29 +19,28 @@ class Test_Resources_Plugin {
     private $level_order = array('beginner' => 1, 'intermediate' => 2, 'advanced' => 3); // for filtering
 
     public function __construct() {
-        register_activation_hook(__FILE__, array($this, 'on_activate')); // seed data on activation
+        register_activation_hook(__FILE__, array($this, 'on_activate'));
         add_action('init', array($this, 'register_post_type_and_meta'));
         add_action('rest_api_init', array($this, 'register_routes'));
     }
 
     public function on_activate() {
-        // Create a sample resource post (seed)
+        // Create a sample resource post if it doesn't exist
         if (get_page_by_title('Sample Resource', OBJECT, 'resource')) {
             return;
         }
 
-        //Commented for now  
-        // $post_id = wp_insert_post(array(
-        //     'post_title'   => 'Sample Resource',
-        //     'post_status'  => 'publish',
-        //     'post_type'    => 'resource',
-        //     'post_content' => '',
-        // ));
+        $post_id = wp_insert_post(array(
+            'post_title'   => 'Sample Resource',
+            'post_status'  => 'publish',
+            'post_type'    => 'resource',
+            'post_content' => '',
+        ));
 
-        // if (! is_wp_error($post_id) && $post_id) {
-        //     update_post_meta($post_id, self::META_KEY_SUMMARY, 'This is a sample summary for the resource. It demonstrates how summaries are stored and used to compute reading estimates.');
-        //     update_post_meta($post_id, self::META_KEY_LEVEL, 'beginner');
-        // }
+        if (! is_wp_error($post_id) && $post_id) {
+            update_post_meta($post_id, self::META_KEY_SUMMARY, 'This is a sample summary for the resource. It demonstrates how summaries are stored and used to compute reading estimates.');
+            update_post_meta($post_id, self::META_KEY_LEVEL, 'beginner');
+        }
     }
 
     public function register_post_type_and_meta() {
@@ -84,11 +83,88 @@ class Test_Resources_Plugin {
         register_rest_route('test/v1', '/resources', array(
             'methods' => 'GET',
             'callback' => array($this, 'handle_get_resources'),
-            // permission callback not used; public endpoint
+            // permission callback not used; we'll simulate auth inside the handler
             'permission_callback' => '__return_true',
         ));
     }
 
+    private function is_request_authenticated(\WP_REST_Request $request) : bool {
+        // Simulation: Accept Authorization header: "Bearer <token>"
+        $auth = $request->get_header('authorization');
+        if (!$auth) {
+            $auth = $request->get_header('Authorization'); // double-check casing
+        }
+        if (!$auth) {
+            // allow explicit X-Auth-Token header too
+            $auth = $request->get_header('x-auth-token');
+        }
+        if (!$auth) {
+            return false;
+        }
+
+        $auth = trim($auth);
+        if (stripos($auth, 'bearer ') === 0) {
+            $token = substr($auth, 7);
+        } else {
+            $token = $auth;
+        }
+
+        // Compare to the constant token above
+        return hash_equals(self::AUTH_TOKEN, $token);
+    }
+
+    public function handle_get_resources(\WP_REST_Request $request) {
+        $min_level = $request->get_param('min_level');
+        if (!in_array($min_level, array('beginner','intermediate','advanced'))) {
+            $min_level = 'beginner';
+        }
+        $min_value = $this->level_order[$min_level];
+
+        // Basic query for resource posts (small dataset assumed). We'll filter by meta in PHP for clarity.
+        $query = new WP_Query(array(
+            'post_type' => 'resource',
+            'post_status' => 'publish',
+            'posts_per_page' => 100,
+        ));
+
+        $items = array();
+        $authenticated = $this->is_request_authenticated($request);
+
+        while ($query->have_posts()) {
+            $query->the_post();
+            $pid = get_the_ID();
+            $title = get_the_title($pid);
+            $summary = get_post_meta($pid, self::META_KEY_SUMMARY, true);
+            $level = get_post_meta($pid, self::META_KEY_LEVEL, true);
+            if (! $level) $level = 'beginner';
+            $level_value = isset($this->level_order[$level]) ? $this->level_order[$level] : 1;
+
+            if ($level_value < $min_value) {
+                continue; // skip lower-level posts
+            }
+
+            // Compute reading_estimate: formula: minutes = ceil(word_count / 200)
+            $word_count = str_word_count(trim($summary));
+            $reading_estimate = (int) ceil($word_count / 200.0);
+
+            $items[] = array(
+                'id' => (int)$pid,
+                'title' => $title,
+                // summary is null for unauthenticated requests
+                'summary' => $authenticated ? $summary : null,
+                'level' => $level,
+                'reading_estimate' => $reading_estimate,
+            );
+        }
+        wp_reset_postdata();
+
+        return rest_ensure_response(array(
+            'success' => true,
+            'min_level' => $min_level,
+            'authenticated' => $authenticated,
+            'items' => $items,
+        ));
+    }
 
 }
 
