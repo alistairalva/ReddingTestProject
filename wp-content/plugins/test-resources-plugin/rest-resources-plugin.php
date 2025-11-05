@@ -22,6 +22,8 @@ class Test_Resources_Plugin {
         register_activation_hook(__FILE__, array($this, 'on_activate'));
         add_action('init', array($this, 'register_post_type_and_meta'));
         add_action('rest_api_init', array($this, 'register_routes'));
+        // add CORS headers for testing from local frontend
+        add_filter('rest_pre_serve_request', array($this, 'rest_add_cors_headers'), 10, 4);
     }
 
     public function on_activate() {
@@ -81,24 +83,39 @@ class Test_Resources_Plugin {
     }
     public function register_routes() {
         register_rest_route('test/v1', '/resources', array(
-            'methods' => 'GET',
+            'methods' => \WP_REST_Server::READABLE, // GET
             'callback' => array($this, 'handle_get_resources'),
-            // permission callback not used; we'll simulate auth inside the handler
             'permission_callback' => '__return_true',
         ));
     }
 
+    public function rest_add_cors_headers($served, $result, $request, $server) {
+        // Allow local dev origins
+        header('Access-Control-Allow-Origin: *');
+        header('Access-Control-Allow-Methods: GET, POST, OPTIONS'); //just in case
+        header('Access-Control-Allow-Headers: Authorization, Content-Type');
+        return $served;
+    }
     private function is_request_authenticated(\WP_REST_Request $request) : bool {
         // Simulation: Accept Authorization header: "Bearer <token>"
         $auth = $request->get_header('authorization');
-        if (!$auth) {
-            $auth = $request->get_header('Authorization'); // double-check casing
+        
+        // Fallbacks: PHP may expose it via $_SERVER or apache_request_headers
+        if (empty($auth)) {
+            if (!empty($_SERVER['HTTP_AUTHORIZATION'])) {
+                $auth = $_SERVER['HTTP_AUTHORIZATION'];
+            } elseif (function_exists('apache_request_headers')) {
+                $headers = apache_request_headers();
+                foreach ($headers as $k => $v) {
+                    if (strtolower($k) === 'authorization') {
+                        $auth = $v;
+                        break;
+                    }
+                }
+            }
         }
-        if (!$auth) {
-            // allow explicit X-Auth-Token header too
-            $auth = $request->get_header('x-auth-token');
-        }
-        if (!$auth) {
+
+        if (empty($auth)) {
             return false;
         }
 
@@ -106,11 +123,12 @@ class Test_Resources_Plugin {
         if (stripos($auth, 'bearer ') === 0) {
             $token = substr($auth, 7);
         } else {
+            // No Bearer prefix
             $token = $auth;
         }
 
         // Compare to the constant token above
-        return hash_equals(self::AUTH_TOKEN, $token);
+        return is_string($token) && hash_equals(self::AUTH_TOKEN, $token);
     }
 
     public function handle_get_resources(\WP_REST_Request $request) {
