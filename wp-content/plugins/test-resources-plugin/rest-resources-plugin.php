@@ -3,7 +3,7 @@
  * Plugin Name: Test Resources Plugin
  * Description: Registers a resource custom post type and exposes /wp-json/test/v1/resources REST endpoint.
  * Version: 1.0
- * Author: Alistair Alvar
+ * Author: Alistair Alva
  * License: GPL2
  */
 
