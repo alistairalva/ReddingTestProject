@@ -20,13 +20,16 @@ class Test_Resources_Plugin {
 
     public function __construct() {
         register_activation_hook(__FILE__, array($this, 'on_activate'));
-        add_action('init', array($this, 'register_post_type_and_meta'));
+        add_action('init', array($this, 'register_post_type'));
         add_action('rest_api_init', array($this, 'register_routes'));
+        add_action('acf/init', array($this, 'register_acf_fields')); // use ACF API
         // add CORS headers for testing from local frontend
         add_filter('rest_pre_serve_request', array($this, 'rest_add_cors_headers'), 10, 4);
     }
 
     public function on_activate() {
+
+        $this->register_post_type();
         // Create a sample resource post if it doesn't exist
         if (get_page_by_title('Sample Resource', OBJECT, 'resource')) {
             return;
@@ -39,13 +42,15 @@ class Test_Resources_Plugin {
             'post_content' => '',
         ));
 
-        if (! is_wp_error($post_id) && $post_id) {
-            update_post_meta($post_id, self::META_KEY_SUMMARY, 'This is a sample summary for the resource. It demonstrates how summaries are stored and used to compute reading estimates.');
-            update_post_meta($post_id, self::META_KEY_LEVEL, 'beginner');
+        if (! is_wp_error($post_id)) {
+            // use ACF API to set fields
+            update_field('summary', 'This is a sample summary stored in ACF. It will be hidden for unauthenticated users.', $post_id);
+            update_field('level', 'beginner', $post_id);
+
         }
     }
 
-    public function register_post_type_and_meta() {
+    public function register_post_type() {
         // Register CPT
         register_post_type('resource', array(
             'labels' => array(
@@ -58,27 +63,48 @@ class Test_Resources_Plugin {
             'supports' => array('title'),
             'capability_type' => 'post',
         ));
+    }
 
-        // Meta: summary (text) and level (enum)
-        register_post_meta('resource', self::META_KEY_SUMMARY, array(
-            'single' => true,
-            'type' => 'string',
-            'show_in_rest' => false, // we'll control returned summary manually in the REST route
-            'auth_callback' => function() { return current_user_can('edit_posts'); },
-        ));
+    // Register ACF fields programmatically
+    public function register_acf_fields() {
+        if (! function_exists('acf_add_local_field_group')) {
+            return;
+        }
 
-        register_post_meta('resource', self::META_KEY_LEVEL, array(
-            'single' => true,
-            'type' => 'string',
-            'show_in_rest' => true,
-            'sanitize_callback' => function($value) {
-                $v = strtolower(trim((string)$value));
-                if (! in_array($v, array('beginner','intermediate','advanced'))) {
-                    return 'beginner';
-                }
-                return $v;
-            },
-            'auth_callback' => function() { return current_user_can('edit_posts'); },
+        acf_add_local_field_group(array(
+            'key' => 'group_resource_fields',
+            'title' => 'Resource Fields',
+            'fields' => array(
+                array(
+                    'key' => 'field_summary',
+                    'label' => 'Summary',
+                    'name' => 'summary',
+                    'type' => 'textarea',
+                    'required' => 1,
+                ),
+                array(
+                    'key' => 'field_level',
+                    'label' => 'Level',
+                    'name' => 'level',
+                    'type' => 'select',
+                    'choices' => array(
+                        'beginner' => 'Beginner',
+                        'intermediate' => 'Intermediate',
+                        'advanced' => 'Advanced',
+                    ),
+                    'default_value' => 'beginner',
+                    'ui' => 1,
+                ),
+            ),
+            'location' => array(
+                array(
+                    array(
+                        'param' => 'post_type',
+                        'operator' => '==',
+                        'value' => 'resource',
+                    ),
+                ),
+            ),
         ));
     }
     public function register_routes() {
@@ -98,7 +124,7 @@ class Test_Resources_Plugin {
     }
     private function is_request_authenticated(\WP_REST_Request $request) : bool {
         // Simulation: Accept Authorization header: "Bearer <token>"
-        $auth = $request->get_header('authorization');
+        $auth = $request->get_header('authorization') ?: $request->get_header('Authorization') ?: $request->get_header('x-auth-token');
         
         // Fallbacks: PHP may expose it via $_SERVER or apache_request_headers
         if (empty($auth)) {
@@ -152,9 +178,11 @@ class Test_Resources_Plugin {
             $query->the_post();
             $pid = get_the_ID();
             $title = get_the_title($pid);
-            $summary = get_post_meta($pid, self::META_KEY_SUMMARY, true);
-            $level = get_post_meta($pid, self::META_KEY_LEVEL, true);
-            if (! $level) $level = 'beginner';
+            //use ACF instead of meta
+            $summary = get_field('summary', $pid);
+            $level = get_field('level', $pid) ?: 'beginner';
+
+            if (!$level) $level = 'beginner';
             $level_value = isset($this->level_order[$level]) ? $this->level_order[$level] : 1;
 
             if ($level_value < $min_value) {
