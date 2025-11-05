@@ -191,7 +191,7 @@ class Test_Resources_Plugin {
 
             // Compute reading_estimate: formula: minutes = ceil(word_count / 200)
             $word_count = str_word_count(trim($summary));
-            $reading_estimate = (int) ceil($word_count / 200.0);
+            $reading_estimate = (int) ceil($word_count / 5);
 
             $items[] = array(
                 'id' => (int)$pid,

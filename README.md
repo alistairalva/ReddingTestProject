@@ -9,7 +9,7 @@
 
 ## Reading estimate formula
 
-reading_estimate (minutes) = ceil(word_count(summary) / 200)
+reading_estimate (minutes) = ceil(word_count(summary) / 5)
 
 ## To test
 
